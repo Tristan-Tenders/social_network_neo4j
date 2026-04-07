@@ -28,23 +28,33 @@ class Database:
     
     # User operations
     def create_user(self, username: str, name: str) -> int:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('INSERT INTO users (username, name) VALUES (?, ?)', (username, name))
-            return cursor.lastrowid
-    
+        with self.driver.session() as neo4j_session:
+            result = neo4j_session.run(
+                '''
+                MATCH (u:User)
+                WITH coalesce(max(u.id), 0) + 1 AS new_id
+                CREATE (n:User {id: new_id, username: $username, name: $name})
+                RETURN new_id
+                ''',
+                username=username, name=name
+            )
+            return result.single()['new_id']
+
     def get_user(self, user_id: int) -> Optional[dict]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT id, username, name FROM users WHERE id = ?', (user_id,))
-            row = cursor.fetchone()
-            return {'id': row[0], 'username': row[1], 'name': row[2]} if row else None
-    
+        with self.driver.session() as neo4j_session:
+            result = neo4j_session.run(
+                'MATCH (u:User {id: $user_id}) RETURN u.id AS id, u.username AS username, u.name AS name',
+                user_id=user_id
+            )
+            record = result.single()
+            return dict(record) if record else None
+
     def get_all_users(self) -> List[dict]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT id, username, name FROM users')
-            return [{'id': row[0], 'username': row[1], 'name': row[2]} for row in cursor.fetchall()]
+        with self.driver.session() as neo4j_session:
+            result = neo4j_session.run(
+                'MATCH (u:User) RETURN u.id AS id, u.username AS username, u.name AS name'
+            )
+            return [dict(record) for record in result]
     
     # Post operations
     def create_post(self, user_id: int, content: str) -> int:
